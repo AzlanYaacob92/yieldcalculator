@@ -41,11 +41,11 @@
           <div class="choice-grid">
             <button class="choice-card choice-card--teal" data-choose="learn" type="button">
               <span class="choice-verb">Learn</span>
-              <span class="choice-desc">Walk me through finding the limiting reactant, then the amount of product or leftover excess — one step at a time.</span>
+              <span class="choice-desc">Tell me who's limiting right away, then walk me through the yield — one step at a time.</span>
             </button>
             <button class="choice-card choice-card--lilac" data-choose="test" type="button">
               <span class="choice-verb">Check my understanding</span>
-              <span class="choice-desc">Give me the moles, let me guess which reactant is limiting, then work out the yield myself before revealing.</span>
+              <span class="choice-desc">Tell me who's limiting, then let me work out the yield myself before revealing.</span>
             </button>
             <button class="choice-card choice-card--gold" data-choose="verify" type="button">
               <span class="choice-verb">Verify my answer</span>
@@ -129,20 +129,6 @@
         </div>
       </div>
 
-      <!-- ============ CARD 3 · STRATEGY ============ -->
-      <div class="wizard-card step-combo" id="card-strategy" hidden>
-        <div class="step-strategy-zone">
-          <span class="strategy-eyebrow">Strategy</span>
-          <p class="strategy-instruction" id="strategy-instruction"></p>
-          <p class="strategy-text" id="strategy-text"></p>
-          <p class="strategy-footnote" id="strategy-footnote" hidden></p>
-        </div>
-        <div class="step-combo-actions">
-          <button class="btn btn--primary" id="strategy-continue" type="button">Continue →</button>
-          <button class="btn btn--ghost" id="strategy-back" type="button">← Back to amounts</button>
-        </div>
-      </div>
-
       <!-- ============ CARD 4a · LEARN — one step at a time ============ -->
       <div class="wizard-card step-combo" id="card-learn" hidden>
         <div class="step-strategy-zone">
@@ -219,7 +205,7 @@
   </main>
 
   <footer class="site-footer">
-    <div><b>How it works:</b> moles <code>n = m ÷ M</code>. For <code>aA + bB → …</code> the amount of B needed to use up all the A is <code>n(A) × b/a</code>. Whichever reactant falls short is limiting. Once that's known, every other species in the equation scales from the same "extent of reaction" — <code>n(limiting) ÷ coef(limiting)</code> — to give the amount of each product formed and how much of the excess reactant is left over.</div>
+    <div><b>How it works:</b> for <code>aA + bB → …</code>, comparing <code>n(A) ÷ a</code> with <code>n(B) ÷ b</code> tells you which reactant runs out first — this tool states that immediately rather than re-deriving it (that's what Stoichiomathics is for). Once it's known, every other species in the equation scales from the same "extent of reaction" — <code>n(limiting) ÷ coef(limiting)</code> — to give the amount of each product formed and how much of the excess reactant is left over.</div>
     <div style="margin-top:8px">Relative atomic masses follow common data-booklet values (H = 1.0, O = 16.0, Cl = 35.5, Cu = 63.5 …). State symbols and spectator H⁺/OH⁻ are omitted. Molar gas volume: 24.0 dm³ mol⁻¹ at RTP, 22.4 dm³ mol⁻¹ at STP. Always re-check against your own mark scheme.</div>
   </footer>
 

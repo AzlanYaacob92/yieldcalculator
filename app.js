@@ -1,14 +1,16 @@
 /* ============================================================================
    app.js  —  presentation layer  (Chemculate Yields)
    Forked from Stoichiomathics: same landing → picker/custom-builder →
-   measurements → strategy → Learn/Check/Verify flow, plus new machinery for
-   the reaction's downstream yield:
-     Verdict (limiting reactant known) → Outputs selector (tick what to
-     find: excess used/left over, and/or any product formed; choose mass /
-     concentration / gas volume for each) → the answer, in whichever mode's
-     style (Learn keeps stepping through card-learn; Check keeps revealing
-     through card-prac; Verify's worksheet — card-verify — is reused as the
-     single shared "final results" screen for every mode).
+   measurements flow (reused as-is). From there this tool diverges — it does
+   NOT re-derive the limiting reactant step by step (that's Stoichiomathics'
+   job); it states it immediately:
+     Measure → Verdict (limiting reactant announced right away, no working
+     shown) → Outputs selector (tick what to find: excess used/left over,
+     and/or any product formed; choose mass / concentration / gas volume for
+     each) → the answer, in whichever mode's style (Learn steps through
+     card-learn; Check reveals through card-prac; Verify's worksheet —
+     card-verify — is reused as the single shared "final results" screen for
+     every mode).
    Depends on chemistry.js (AM, CAT, QUAL, MOLAR_VOL, fmtEq, fmtFormula,
    molarMass, massParts, composition, computeLimiting, computeProductYields,
    computeExcessUsage, amountFromMoles). All chemistry stays in chemistry.js.
@@ -201,14 +203,13 @@
     cat: "all", els: new Set(), matchMode: "all",
     sel: null,              // a QUAL index, or the string 'custom'
     inA: freshInput(), inB: freshInput(),
-    learn: null,            // { steps, idx, calcShown, phase: 'main' | 'yield' }
-    prac: null,             // { steps, idx, revealed, guess, phase: 'main' | 'yield' }
+    learn: null,            // { steps, idx, calcShown }
+    prac: null,             // { steps, idx, revealed }
     customCount: 1,         // number of products chosen in the custom builder (1–4)
     customFields: null,     // working {coef, name} rows while the builder is open — session-only, never saved
     customQ: null,          // the built custom reaction, same shape as a QUAL entry
     outputs: null           // [{ kind:'excess'|'product', idx, enabled, fmt }] — what to calculate and how
   };
-  const MODE_VERB = { learn: 'Learn', test: 'Check my understanding', verify: 'Verify my answer' };
 
   // Every place downstream (measure/strategy/learn/practice/verify) reads the
   // active reaction through this, so a custom, session-only reaction can sit
@@ -222,7 +223,6 @@
     customSetup: document.getElementById('card-custom-setup'),
     customBuild: document.getElementById('card-custom-build'),
     measure: document.getElementById('card-measure'),
-    strategy:document.getElementById('card-strategy'),
     learn:   document.getElementById('card-learn'),
     prac:    document.getElementById('card-prac'),
     verify:  document.getElementById('card-verify'),
@@ -617,47 +617,10 @@
       return;
     }
     err.hidden = true;
-    goTo('strategy', 'forward', renderStrategy);
-  });
-
-  /* ---------------- strategy card (all branches) ---------------- */
-  function renderStrategy() {
-    const q = currentQ();
-    const A = q.A, B = q.B;
-    const instruction = document.getElementById('strategy-instruction');
-    const text = document.getElementById('strategy-text');
-    const foot = document.getElementById('strategy-footnote');
-    const btn = document.getElementById('strategy-continue');
-
-    instruction.textContent = 'Compare moles, not grams.';
-    text.innerHTML = `Decide which of <b>${fmtFormula(A.sp)}</b> and <b>${fmtFormula(B.sp)}</b> runs out first. ` +
-      `Convert each amount to <b>moles</b>, then use the equation's <b>${A.coef} : ${B.coef}</b> ratio to ask: ` +
-      `is there enough ${fmtFormula(B.sp)} to use up all the ${fmtFormula(A.sp)}? ` +
-      `Whichever reactant falls short is the <b>limiting reactant</b> — it controls how much product forms.`;
-    if (q.hadSpect) {
-      foot.textContent = 'H⁺ / OH⁻ is supplied in excess and is left out of the comparison.';
-      foot.hidden = false;
-    } else { foot.hidden = true; }
-
-    btn.textContent = state.mode === 'learn' ? 'Start the working →'
-                    : state.mode === 'test' ? 'Start practising →'
-                    : 'Choose what to calculate →';
-  }
-
-  document.getElementById('strategy-back').addEventListener('click', () => {
-    goTo('measure', 'back');
-  });
-
-  document.getElementById('strategy-continue').addEventListener('click', () => {
-    if (state.mode === 'learn') {
-      state.learn = { steps: buildLearnSteps(), idx: 0, calcShown: false, phase: 'main' };
-      goTo('learn', 'forward', renderLearnStep);
-    } else if (state.mode === 'test') {
-      state.prac = { steps: buildPracSteps(), idx: 0, revealed: false, guess: null, phase: 'main' };
-      goTo('prac', 'forward', renderPracStep);
-    } else {
-      goTo('outputs', 'forward', () => renderOutputs('Choose what to calculate, then see every answer at once.'));
-    }
+    // No working shown here — finding the limiting reactant step by step is
+    // Stoichiomathics' job. This tool assumes it's already known and states
+    // it immediately, then moves straight to what it's actually for: yield.
+    goTo('verdict', 'forward', renderVerdict);
   });
 
   /* ---------------- shared computation for the working ---------------- */
@@ -665,95 +628,6 @@
     const q = currentQ();
     const nA = molesOf(state.inA, q.A.sp), nB = molesOf(state.inB, q.B.sp);
     return { q, res: computeLimiting(q, nA, nB) };
-  }
-
-  /* line(s) converting one reactant's amount to moles —
-     formula first, then the substitution, then the result, all in one
-     stacked grid (notation follows the Concentration Trainer). */
-  function moleMath(inp, sp, n) {
-    const f = fmtFormula(sp);
-    if (inp.method === 'mass') {
-      const m = parseFloat(inp.mass), M = molarMass(sp);
-      return `n(${f}) = ${frac('m', 'M')} = ${frac(sig(m) + ' g', mm1(M) + ' g mol⁻¹')} = ${sig(n)} mol`;
-    }
-    if (inp.method === 'conc') {
-      const c = parseFloat(inp.conc); const Vr = parseFloat(inp.cvol);
-      const V = inp.cvolUnit === 'cm3' ? Vr / 1000 : Vr;
-      const conv = inp.cvolUnit === 'cm3' ? `V = ${sig(Vr)} cm³ = ${sig(V)} dm³<br>` : '';
-      return `${conv}n(${f}) = c × V = ${sig(c)} × ${sig(V)} = ${sig(n)} mol`;
-    }
-    const Vr = parseFloat(inp.gvol);
-    const V = inp.gvolUnit === 'cm3' ? Vr / 1000 : Vr;
-    const Vm = MOLAR_VOL[inp.cond];
-    const conv = inp.gvolUnit === 'cm3' ? `V = ${sig(Vr)} cm³ = ${sig(V)} dm³<br>` : '';
-    return `${conv}n(${f}) = ${frac('V', 'V<sub>m</sub>')} = ${frac(sig(V) + ' dm³', Vm.toFixed(1) + ' dm³ mol⁻¹')} = ${sig(n)} mol`;
-  }
-
-  function moleStrategy(inp, sp) {
-    const f = fmtFormula(sp);
-    if (inp.method === 'mass') return `The amount of ${f} is given as a mass, so divide by its molar mass: n = m ÷ M.`;
-    if (inp.method === 'conc') return `The amount of ${f} is given as a solution, so multiply concentration by volume (in dm³): n = c × V.`;
-    return `The amount of ${f} is a gas volume, so divide by the molar gas volume: n = V ÷ V<sub>m</sub>.`;
-  }
-  function moleFootnote(inp) {
-    if (inp.method === 'conc' && inp.cvolUnit === 'cm3') return 'The volume was entered in cm³ (mL) — convert to dm³ (L) by dividing by 1000 before multiplying.';
-    if (inp.method === 'gas') {
-      const base = inp.cond === 'RTP' ? 'RTP: 24.0 dm³ mol⁻¹ (room temperature and pressure)' : 'STP: 22.4 dm³ mol⁻¹ (standard temperature and pressure)';
-      return (inp.gvolUnit === 'cm3' ? 'The gas volume was entered in cm³ (mL) — convert to dm³ (L) by dividing by 1000. ' : '') + 'Molar volume at ' + base + '.';
-    }
-    return null;
-  }
-
-  /* molar-mass working for one species — one term per element */
-  function mmMath(sp) {
-    const parts = massParts(sp), M = molarMass(sp);
-    const formula = parts.map(p => (p.n > 1 ? p.n + 'A<sub>r</sub>(' + p.el + ')' : 'A<sub>r</sub>(' + p.el + ')')).join(' + ');
-    const subst = parts.map(p => (p.n > 1 ? p.n + ' × ' + mm1(p.a) : mm1(p.a))).join(' + ');
-    return `M(${fmtFormula(sp)}) = ${formula} = ${subst} = ${mm1(M)} g mol⁻¹`;
-  }
-
-  /* ---------------- LEARN: build the step list ---------------- */
-  function buildLearnSteps() {
-    const { q, res } = computed();
-    const A = q.A, B = q.B, a = A.coef, b = B.coef;
-    const steps = [];
-
-    // molar masses — only for reactants entered by mass
-    const massSides = [[A, state.inA], [B, state.inB]].filter(([x, inp]) => inp.method === 'mass');
-    massSides.forEach(([x]) => {
-      steps.push({
-        instruction: `Work out the molar mass of ${fmtFormula(x.sp)}.`,
-        strategy: 'Add up the relative atomic masses of every atom in the formula — multiply by the subscript where an element appears more than once.',
-        math: mmMath(x.sp)
-      });
-    });
-
-    // moles of each reactant
-    [[A, state.inA, res.nA], [B, state.inB, res.nB]].forEach(([x, inp, n]) => {
-      steps.push({
-        instruction: `Convert the amount of ${fmtFormula(x.sp)} to moles.`,
-        strategy: moleStrategy(inp, x.sp),
-        footnote: moleFootnote(inp),
-        math: moleMath(inp, x.sp, n)
-      });
-    });
-
-    // mole ratio
-    steps.push({
-      instruction: 'Read off the mole ratio.',
-      strategy: `From the balanced equation, ${fmtFormula(A.sp)} and ${fmtFormula(B.sp)} react in the ratio ${a} : ${b} — every ${a} mol of ${fmtFormula(A.sp)} needs ${b} mol of ${fmtFormula(B.sp)}.`,
-      math: `${fmtFormula(A.sp)} : ${fmtFormula(B.sp)} = ${a} : ${b}`
-    });
-
-    // compare needed vs available
-    const cmpWord = res.tie ? 'exactly equal to' : (res.enough ? 'no more than' : 'more than');
-    steps.push({
-      instruction: 'Compare: how much is needed vs available.',
-      strategy: `Work out how much ${fmtFormula(B.sp)} would be needed to use up all ${sig(res.nA)} mol of ${fmtFormula(A.sp)}, then compare it with the ${sig(res.nB)} mol you actually have. Here, the amount needed is ${cmpWord} the amount available.`,
-      math: `n(${fmtFormula(B.sp)}) needed = n(${fmtFormula(A.sp)}) × ${frac(String(b), String(a))} = ${sig(res.nA)} × ${frac(String(b), String(a))} = ${sig(res.nBneed)} mol<br>n(${fmtFormula(B.sp)}) available = ${sig(res.nB)} mol`
-    });
-
-    return steps;
   }
 
   const learnEyebrow = document.getElementById('learn-eyebrow');
@@ -778,12 +652,12 @@
 
   learnNext.addEventListener('click', () => {
     if (!state.learn) return;
-    const { steps, idx, calcShown, phase } = state.learn;
+    const { steps, idx, calcShown } = state.learn;
     if (!calcShown) {
       typewriterMathGrid(learnMath, steps[idx].math);
       state.learn.calcShown = true;
       const isLast = idx === steps.length - 1;
-      learnNext.textContent = isLast ? (phase === 'yield' ? 'See all my results' : 'Reveal the conclusion') : 'Next step →';
+      learnNext.textContent = isLast ? 'See all my results' : 'Next step →';
       return;
     }
     if (idx + 1 < steps.length) {
@@ -791,50 +665,12 @@
         state.learn.idx = idx + 1;
         renderLearnStep();
       });
-    } else if (phase === 'yield') {
-      goTo('verify', 'forward', renderVerify);
     } else {
-      goTo('verdict', 'forward', renderVerdict);
+      goTo('verify', 'forward', renderVerify);
     }
   });
 
   /* ---------------- PRACTISE: one card at a time, gated ---------------- */
-  function buildPracSteps() {
-    const { q, res } = computed();
-    const A = q.A, B = q.B, a = A.coef, b = B.coef;
-    const fA = fmtFormula(A.sp), fB = fmtFormula(B.sp);
-
-    return [
-      {
-        instruction: 'Here are the moles — the rest is yours.',
-        strategy: 'Both amounts have been converted to moles for you. From here on, predict each result before you reveal it.',
-        kind: 'given',
-        body: `<div class="ans-lines">${mathGrid(`n(${fA}) = ${sig(res.nA)} mol<br>n(${fB}) = ${sig(res.nB)} mol`)}</div>`
-      },
-      {
-        instruction: 'Read off the mole ratio.',
-        strategy: `What is the ${fA} : ${fB} ratio in the balanced equation? Say it out loud, then reveal.`,
-        kind: 'reveal',
-        revealLabel: 'Ratio from the balanced equation — try it first',
-        body: `<div class="ans-lines">${mathGrid(`${fA} : ${fB} = ${a} : ${b}`)}</div>`
-      },
-      {
-        instruction: 'Compare: needed vs available.',
-        strategy: `How much ${fB} would be needed to react with all ${sig(res.nA)} mol of ${fA}? Work it out on paper — n(${fA}) × ${b}⁄${a} — then reveal.`,
-        kind: 'reveal',
-        revealLabel: 'Needed amount vs available amount',
-        body: `<div class="ans-lines">${mathGrid(`n(${fB}) needed = ${sig(res.nA)} × ${frac(String(b), String(a))} = ${sig(res.nBneed)} mol<br>n(${fB}) available = ${sig(res.nB)} mol`)}</div>`
-      },
-      {
-        instruction: 'Which reactant is limiting?',
-        strategy: res.tie
-          ? 'Compare the needed amount with the available amount. Careful — this one may surprise you.'
-          : 'Make a prediction first — then the answer reveals itself.',
-        kind: 'guess'
-      }
-    ];
-  }
-
   const pracEyebrow = document.getElementById('prac-eyebrow');
   const pracInstruction = document.getElementById('prac-instruction');
   const pracStrategy = document.getElementById('prac-strategy');
@@ -848,43 +684,18 @@
     pracInstruction.innerHTML = s.instruction;
     pracStrategy.innerHTML = s.strategy;
     state.prac.revealed = false;
-    state.prac.guess = null;
 
-    if (s.kind === 'given') {
-      pracBody.innerHTML = s.body;
-      pracNext.hidden = false;
-      pracNext.textContent = 'Next step →';
-    } else if (s.kind === 'reveal') {
-      pracBody.innerHTML =
-        `<div class="reveal" data-reveal="1" role="button" tabindex="0">
-          <span class="rl">${s.revealLabel}</span>
-          <span class="rk">Reveal ▾</span>
-        </div>`;
-      pracNext.hidden = true;
-      wirePracBody();
-    } else { // guess
-      const { q, res } = computed();
-      pracBody.innerHTML =
-        `<div class="gprompt">Make a prediction:</div>
-         <div class="guess">
-           ${[q.A, q.B].map(x => `<button class="gbtn" data-guess="${x.sp}" type="button">${fmtFormula(x.sp)}</button>`).join('')}
-           ${res.tie ? '<button class="gbtn" data-guess="__tie__" type="button">Neither — exact</button>' : ''}
-         </div>
-         <div class="reveal" data-reveal="1" role="button" tabindex="0">
-           <span class="rl">…or just reveal the answer</span>
-           <span class="rk">Reveal ▾</span>
-         </div>`;
-      pracNext.hidden = true;
-      wirePracBody();
-    }
+    pracBody.innerHTML =
+      `<div class="reveal" data-reveal="1" role="button" tabindex="0">
+        <span class="rl">${s.revealLabel}</span>
+        <span class="rk">Reveal ▾</span>
+      </div>`;
+    pracNext.hidden = true;
+    wirePracBody();
   }
 
   function wirePracBody() {
     pracBody.querySelectorAll('[data-reveal]').forEach(el => el.addEventListener('click', pracReveal));
-    pracBody.querySelectorAll('[data-guess]').forEach(el => el.addEventListener('click', () => {
-      state.prac.guess = el.dataset.guess;
-      pracReveal();
-    }));
   }
 
   function pracReveal() {
@@ -893,60 +704,33 @@
     if (state.prac.revealed) return;
     state.prac.revealed = true;
 
-    if (s.kind === 'reveal') {
-      pracBody.innerHTML = s.body;
-      pracNext.hidden = false;
-      const isLast = idx === steps.length - 1;
-      pracNext.textContent = isLast ? (state.prac.phase === 'yield' ? 'See all my results →' : 'Next step →') : 'Next step →';
-      return;
-    }
-
-    // guess step → verdict feedback inline, then hand off to the verdict card
-    const { q, res } = computed();
-    const correctSp = res.tie ? '__tie__' : res.limiting.sp;
-    const guessed = state.prac.guess;
-    let feedback = '';
-    if (guessed) {
-      const correct = guessed === correctSp;
-      feedback = `<div class="guess">` +
-        [q.A, q.B].map(x => {
-          const cls = x.sp === guessed ? (x.sp === correctSp ? 'ok' : 'no') : (x.sp === correctSp ? 'ok' : '');
-          return `<button class="gbtn ${cls}" disabled type="button">${fmtFormula(x.sp)}</button>`;
-        }).join('') +
-        (res.tie ? `<button class="gbtn ${guessed === '__tie__' ? 'ok' : 'ok'}" disabled type="button">Neither — exact</button>` : '') +
-        `</div><div class="gverdict ${guessed === correctSp ? 'gv-ok' : 'gv-no'}">${guessed === correctSp ? 'Correct ✓' : 'Not quite — see the conclusion'}</div>`;
-    } else {
-      feedback = `<div class="gverdict">Answer revealed — see the conclusion.</div>`;
-    }
-    pracBody.innerHTML = feedback;
+    pracBody.innerHTML = s.body;
     pracNext.hidden = false;
-    pracNext.textContent = 'See the conclusion →';
+    const isLast = idx === steps.length - 1;
+    pracNext.textContent = isLast ? 'See all my results →' : 'Next step →';
   }
 
   pracNext.addEventListener('click', () => {
     if (!state.prac) return;
-    const { steps, idx, phase } = state.prac;
+    const { steps, idx } = state.prac;
     if (idx + 1 < steps.length) {
       panTransition(cards.prac, cards.prac, 'forward', () => {
         state.prac.idx = idx + 1;
         renderPracStep();
       });
-    } else if (phase === 'yield') {
-      goTo('verify', 'forward', renderVerify);
     } else {
-      goTo('verdict', 'forward', renderVerdict);
+      goTo('verify', 'forward', renderVerify);
     }
   });
 
   /* ================= outputs selector (Chemculate Yields) =================
-     Reached either straight from Strategy (Verify mode — nothing's been
-     revealed yet) or from the Verdict card's "Calculate the yield" button
-     (Learn/Check — the limiting reactant is already known). Builds one row
-     per thing the student could ask for: the excess reactant's used/left-over
-     amount (skipped entirely for an exact, tie reaction — there's nothing
-     left over to report), and one row per product in the equation. Nothing
-     here is persisted — like the custom builder, it's rebuilt fresh every
-     time this card is entered. */
+     Reached from the Verdict card's "Calculate the yield" button, for every
+     mode alike (the limiting reactant is already known by then — this tool
+     doesn't re-derive it). Builds one row per thing the student could ask
+     for: the excess reactant's used/left-over amount (skipped entirely for
+     an exact, tie reaction — there's nothing left over to report), and one
+     row per product in the equation. Nothing here is persisted — like the
+     custom builder, it's rebuilt fresh every time this card is entered. */
   function rowId(row) { return row.kind + (row.idx == null ? '' : row.idx); }
   function findRow(id) { return state.outputs.find(r => rowId(r) === id); }
 
@@ -1035,7 +819,7 @@
   }
 
   document.getElementById('outputs-back').addEventListener('click', () => {
-    goTo(state.mode === 'verify' ? 'strategy' : 'verdict', 'back', state.mode === 'verify' ? renderStrategy : renderVerdict);
+    goTo('verdict', 'back', renderVerdict);
   });
 
   document.getElementById('outputs-continue').addEventListener('click', () => {
@@ -1049,10 +833,10 @@
     if (state.mode === 'verify') {
       goTo('verify', 'forward', renderVerify);
     } else if (state.mode === 'learn') {
-      state.learn = { steps: buildYieldLearnSteps(), idx: 0, calcShown: false, phase: 'yield' };
+      state.learn = { steps: buildYieldLearnSteps(), idx: 0, calcShown: false };
       goTo('learn', 'forward', renderLearnStep);
     } else {
-      state.prac = { steps: buildYieldPracSteps(), idx: 0, revealed: false, guess: null, phase: 'yield' };
+      state.prac = { steps: buildYieldPracSteps(), idx: 0, revealed: false };
       goTo('prac', 'forward', renderPracStep);
     }
   });
